@@ -45,6 +45,7 @@ struct cn{
     struct cn *next;
     float cpu;
     float mem;
+    float norm_res;
 
 };
 struct vm{
@@ -132,6 +133,12 @@ int better_fill_heuristics(geneptr t1,pmptr pm1,int cn_ogi,int *cn_absent,int *a
 int best_fill_heuristics(pmptr pm1,int cn_ogi);
 int first_fill_heuristics(pmptr pm1, int cn_ogi);
 geneptr crossover2(geneptr parent1,geneptr parent2,int cpumem);
+void heuristics2(geneptr t1,int cn_absent[CNT_SIZE],int absent_count);
+void sortContainersByRes(geneptr t1);
+void calculateContRes(geneptr t1);
+cnptr findprevcn(cnptr c1,vmptr v1);
+int rep_small_two_heuristics(geneptr t1,vmptr v1,int cn_absent[CNT_SIZE],int absent_count);
+void ff_rc_heuristics(cnptr cn,geneptr t1);
 
 int main (){
 
@@ -583,8 +590,8 @@ void switchpm(pmptr pm1,pmptr pm2,geneptr t1){
 
         }
 
-        //pm2 is last
-        if(pm1->next==NULL){
+        //pm2 is last but pm1 isnt first
+        if(pm2->next==NULL){ //changed pm1 to pm2 here
             //printf("\nswitch 6");
             pmptr prevpm1=findprevpm(t1,pm1);
 
@@ -593,8 +600,8 @@ void switchpm(pmptr pm1,pmptr pm2,geneptr t1){
             pm2->next=pm1;
             return;
         }
+        //if neither
 
-        //printf("\nswitch 8");
         pmptr prevpm1=findprevpm(t1,pm1);
         pmptr nextpm2=pm2->next;
 
@@ -916,6 +923,270 @@ int first_fill_heuristics(pmptr pm1, int cn_ogi){
     return(0);
 }
 
+void calculateContRes(geneptr t1){
+    for(pmptr p1=t1->hpm;p1!=NULL;p1=p1->next){
+        for(vmptr v1=p1->hvm;v1!=NULL;v1=v1->next){
+            for(cnptr c1=v1->hcn;c1!=NULL;c1=c1->next){
+                c1->norm_res=(c1->cpu/data1.pm[0])*(c1->mem/data1.pm[1]);
+            }
+        }
+    }
+}
+
+cnptr findprevcn(cnptr c1,vmptr v1){
+    for(cnptr cn1=v1->hcn;cn1->next!=NULL;cn1=cn1->next){
+        if(cn1->next==c1){
+            return(cn1);
+        }
+    }
+    printf("ERROR:CANT FIND PREV CN");
+    exit(0);
+}
+
+void swapContainers(cnptr c1,cnptr c2,vmptr v1){
+    if((c1==NULL)||(c2==NULL)){
+        printf("\nERROR: Cant swap null container.");
+        exit(0);
+    }
+    if(c1==c2){
+        return;
+    }
+    //if c1 and c2 are next to each other
+    if(c1->next==c2){
+        if(v1->hcn==c1){
+            if(c2->next==NULL){
+                v1->hcn=c2;
+                c2->next=c1;
+                c1->next=NULL;
+                return;
+            }
+            cnptr c2next=c2->next;
+            v1->hcn=c2;
+            c2->next=c1;
+            c1->next=c2next;
+            return;
+        }
+        if(c2->next==NULL){
+            cnptr c1prev=findprevcn(c1,v1);
+            c1prev->next=c2;
+            c2->next=c1;
+            c1->next=NULL;
+            return;
+        }
+        cnptr c1prev=findprevcn(c1,v1);
+        cnptr c2next=c2->next;
+        c1prev->next=c2;
+        c2->next=c1;
+        c1->next=c2next;
+        return;
+    }
+    if(c2->next==c1){
+        swapContainers(c2,c1,v1);
+        return;
+    }
+    if(v1->hcn==c1){
+        if(c2->next==NULL){
+            cnptr c2prev=findprevcn(c2,v1);
+            v1->hcn=c2;
+            c2->next=c1->next;
+            c2prev->next=c1;
+            c1->next=NULL;
+            return;
+        }
+        cnptr c2prev=findprevcn(c2,v1);
+        cnptr c2next=c2->next;
+        v1->hcn=c2;
+        c2->next=c1->next;
+        c2prev->next=c1;
+        c1->next=c2next;
+        return;
+    }
+    if(v1->hcn==c2){
+        swapContainers(c2,c1,v1);
+        return;
+    }
+
+    if(c2->next==NULL){
+        cnptr c1prev=findprevcn(c1,v1);
+        cnptr c2prev=findprevcn(c2,v1);
+        c1prev->next=c2;
+        c2->next=c1->next;
+        c2prev->next=c1;
+        c1->next=NULL;
+        return;
+    }
+    if(c1->next==NULL){
+        swapContainers(c2,c1,v1);
+        return;
+    }
+
+    cnptr c1prev=findprevcn(c1,v1);
+    cnptr c2prev=findprevcn(c2,v1);
+    cnptr c2next=c2->next;
+    c1prev->next=c2;
+    c2->next=c1->next;
+    c2prev->next=c1;
+    c1->next=c2next;
+    return;
+}
+
+void sortContainersByRes(geneptr t1){
+    calculateContRes(t1);
+    for(pmptr p1=t1->hpm;p1!=NULL;p1=p1->next){
+        for(vmptr v1=p1->hvm;v1!=NULL;v1=v1->next){
+            for(cnptr c1=v1->hcn;c1!=NULL;c1=c1->next){
+                cnptr best_cn=c1;
+                for(cnptr c2=c1->next;c2!=NULL;c2=c2->next){
+                    if(best_cn->norm_res>c2->norm_res){
+                        best_cn=c2;
+                    }
+                }
+                if(best_cn==c1){
+                    continue;
+                }
+                cnptr tempcn=best_cn;
+                swapContainers(c1,best_cn,v1);
+                c1=tempcn;
+            }
+        }
+    }
+}
+
+void ff_rc_heuristics(cnptr cn,geneptr t1){
+    float cpu_req=cn->cpu;
+    float mem_req=cn->mem;
+    cnptr new_cn=create_cn(cn->ogi);
+
+    vmptr selected_vm=NULL;
+    for(pmptr p1=t1->hpm;p1!=NULL;p1=p1->next){
+        for(vmptr v1=p1->hvm;v1!=NULL;v1=v1->next){
+            if((v1->cpu>=cpu_req)&&(v1->mem>=mem_req)){
+                selected_vm=v1;
+                break;
+            }
+        }
+    }
+    //if theres any vm that can contain both
+    if(selected_vm!=NULL){
+        addCnInVm(new_cn,selected_vm);
+        return;
+    }
+
+    //create new vm
+    int vm_ogi=rand()%VM_SIZE;
+    float vm_cpu=data1.VM_TYPE[vm_ogi][0];
+    float vm_mem=data1.VM_TYPE[vm_ogi][1];
+
+    while((data1.pm[0]<(vm_cpu*1.1)) || (data1.pm[1]<(vm_mem+200)) || (vm_mem<mem_req) || (vm_cpu<cpu_req)){
+        vm_ogi=rand()%VM_SIZE;
+        vm_cpu=data1.VM_TYPE[vm_ogi][0];
+        vm_mem=data1.VM_TYPE[vm_ogi][1];
+    }
+
+    vmptr new_vm=create_vm(vm_ogi);
+    addCnInVm(new_cn,new_vm);
+
+    //find pm which has space for this vm
+    pmptr selected_pm=NULL;
+    float req_cpu_vm=vm_cpu*1.1;
+    float req_mem_vm=vm_mem+200;
+
+    for(pmptr p1=t1->hpm;p1!=NULL;p1=p1->next){
+        if((p1->cpu>=req_cpu_vm)&&(p1->mem>=req_mem_vm)){
+            selected_pm=p1;
+            break;
+        }
+    }
+    //if there is an existing pm that can have it
+    if(selected_pm!=NULL){
+        addVmInPm(new_vm,selected_pm);
+        return;
+    }
+    //if there's not
+    pmptr new_pm=create_pm(t1);
+    addVmInPm(new_vm,new_pm);
+
+}
+
+int rep_small_two_heuristics(geneptr t1,vmptr v1,int cn_absent[CNT_SIZE],int absent_count){
+
+    for(int i=0;i<absent_count;i++){
+        float cpu_req=data1.CNT_TYPE[cn_absent[i]][0];
+        float mem_req=data1.CNT_TYPE[cn_absent[i]][1];
+
+
+        cnptr first_cn=v1->hcn;
+        cnptr second_cn=first_cn->next;
+
+        if((first_cn->cpu+second_cn->cpu<=cpu_req)&&(first_cn->mem+second_cn->mem<=mem_req)){
+            //replace the two cn with given cn
+                //delete 2 cn
+            removeContainer(first_cn->ogi,t1);
+            removeContainer(second_cn->ogi,t1);
+                //add new container to vm
+            cnptr new_cn=create_cn(cn_absent[i]);
+            addCnInVm(new_cn,v1);
+
+            //allocate the two cn with ff/ff&RC. create a random vm if no space is available in any vm.
+            ff_rc_heuristics(first_cn,t1);
+            ff_rc_heuristics(second_cn,t1);
+
+            //sort all again
+            sortContainersByRes(t1);
+            //return the id of 2 containers deleted.
+            return(i);
+        }
+    }
+    return(-1);
+}
+
+void allocate_list_ff_rc(geneptr t1,int cn_absent[CNT_SIZE],int absent_count){
+    //loop over all one by one
+    for(int i=0;i<absent_count;i++){
+        //allocate using ff_rc/ff
+        cnptr newcn=create_cn(cn_absent[i]);
+        ff_rc_heuristics(newcn,t1);
+    }
+
+}
+
+void heuristics2(geneptr t1,int cn_absent[CNT_SIZE],int absent_count){
+    //if(absent_count==0){
+     //   return;
+    //}
+    //sortPmByUtlz(t1,1);
+    //printf("\nAbsent Count:%d ",absent_count);
+    //int cn_ogi=cn_absent[absent_count-1];
+    //float cpu_req=data1.CNT_TYPE[cn_ogi][0];
+    //float mem_req=data1.CNT_TYPE[cn_ogi][1];
+
+    sortContainersByRes(t1);
+    //printstats(t1);
+
+    for(pmptr p1=t1->hpm;p1!=NULL;p1=p1->next){
+        vmptr v1=p1->hvm;
+        while((v1!=NULL)&&(absent_count>0)){
+            int replaced_container=rep_small_two_heuristics(t1,v1,cn_absent,absent_count);
+
+            if(replaced_container==-1){
+                v1=v1->next;
+                continue;
+            }
+            if(absent_count==(replaced_container+1)){
+                absent_count--;
+                continue;
+            }
+            cn_absent[replaced_container]=cn_absent[absent_count-1];
+            absent_count--;
+        }
+    }
+
+    if(absent_count>0){
+        allocate_list_ff_rc(t1,cn_absent,absent_count);
+    }
+
+}
+
 void heuristics(geneptr t1,int cn_absent[CNT_SIZE],int absent_count){
     if(absent_count==0){
         return;
@@ -1130,7 +1401,8 @@ geneptr crossover2(geneptr parent1,geneptr parent2,int cpumem){
 
 
     if(absent_count!=0){
-        heuristics(child,cn_absent,absent_count);
+        printf("in crossover2 7");
+        heuristics2(child,cn_absent,absent_count);
     }
 
     count_containers(child);
@@ -1478,7 +1750,7 @@ void printstats(geneptr t1){
             cnptr cn=vm->hcn;
             int k=0;
             while(cn!=NULL){
-                printf("\n\t\tContainer:%d : CPU taken:%f Mem taken:%f",k,cn->cpu,cn->mem);
+                printf("\n\t\tContainer:%d : %d : CPU taken:%f Mem taken:%f",k,cn->ogi,cn->cpu,cn->mem);
                 cn=cn->next;
                 k++;
             }
